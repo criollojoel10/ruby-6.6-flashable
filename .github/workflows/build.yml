@@ -1,0 +1,263 @@
+name: "Build ruby 6.6 flashable (MIUI/HyperOS)"
+
+# Kernel 6.6.143 de RubyxLabs (lineage-24.0) empaquetado al estilo MoonWake:
+# AnyKernel3 (parchea el boot existente y conserva el ramdisk de MIUI) +
+# dtbo.img. Pensado para rubyx/ruby (Redmi Note 12 Pro/Pro+ 5G, MT6877).
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: "Ref de RubyxLabs/android_kernel_xiaomi_mt6877"
+        default: "lineage-24.0"
+        required: true
+      ksu:
+        description: "Integrar KernelSU-Next (con Magisk NO hace falta)"
+        type: choice
+        options:
+          - "false"
+          - "true"
+        default: "false"
+      localversion:
+        description: "CONFIG_LOCALVERSION (sufijo visible en uname -r)"
+        default: "-ruby66-miui"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Checkout kernel (RubyxLabs)
+        uses: actions/checkout@v4
+        with:
+          repository: RubyxLabs/android_kernel_xiaomi_mt6877
+          ref: ${{ inputs.kernel_ref }}
+          path: kernel
+          fetch-depth: 1
+
+      - name: Dependencias
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev libncurses-dev \
+            cpio kmod rsync zstd xz-utils gzip python3 perl git curl \
+            ca-certificates dwarves ccache clang lld llvm zip unzip \
+            device-tree-compiler
+          # LLVM=1 necesita nombres sin versión; Ubuntu los empaqueta versionados.
+          for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump \
+                   llvm-readelf llvm-readobj llvm-strip llvm-size llvm-strings; do
+            command -v "$t" >/dev/null && continue
+            src=$(ls /usr/lib/llvm-*/bin/"$t" 2>/dev/null | head -n1 || true)
+            [ -n "$src" ] && sudo ln -sf "$src" /usr/bin/"$t"
+          done
+          clang --version | head -n1
+          ld.lld --version | head -n1
+
+      - name: KernelSU-Next (opcional)
+        if: ${{ inputs.ksu == 'true' }}
+        working-directory: kernel
+        run: |
+          set -euo pipefail
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
+          test -d drivers/kernelsu
+          grep -q kernelsu drivers/Makefile
+          sed -i 's/ -dirty//g' scripts/setlocalversion
+
+      - name: Arreglos del snapshot publicado (audio DSP + IOMMU MTK)
+        working-directory: kernel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # El snapshot 6.6.143 no incluye los headers del audio DSP; se dejan
+          # fuera por config (el audio normal ASoC sigue compilando).
+          F=sound/soc/mediatek/audio_dsp/v2/Makefile
+          mkdir -p "$(dirname "$F")"
+          touch "$F"
+          grep -qF 'I$(srctree)/sound/soc/mediatek/audio_dsp/v2' "$F" || \
+            echo 'ccflags-y += -I$(srctree)/sound/soc/mediatek/audio_dsp/v2' >> "$F"
+
+          # Falta drivers/iommu/mtk_iommu_ext.h en el árbol publicado.
+          # Se toma el del árbol MT6877 de crdroid (mismo SoC).
+          H=drivers/iommu/mtk_iommu_ext.h
+          if [ ! -f "$H" ]; then
+            gh api "repos/crdroidandroid/android_kernel_xiaomi_mt6877/contents/$H?ref=16.0" \
+              --jq '.content' | base64 -d > "$H"
+            echo "vendorizado $H ($(wc -l < "$H") líneas)"
+          fi
+          if ! grep -q 'MTK_IOMMU_PGTABLE_EXT' drivers/iommu/Kconfig; then
+            echo 'HEADER_DEFS=-DCONFIG_MTK_IOMMU_PGTABLE_EXT=32' >> "$GITHUB_ENV"
+          fi
+
+      - name: Configurar (ruby_defconfig)
+        working-directory: kernel
+        run: |
+          set -euo pipefail
+          export ARCH=arm64 LLVM=1
+          make ruby_defconfig
+          ./scripts/config --file .config \
+            -d MTK_AUDIODSP_SUPPORT -d SND_SOC_MTK_AUDIO_DSP -d WERROR
+          ./scripts/config --file .config \
+            -e SYSVIPC -e POSIX_MQUEUE -e NAMESPACES \
+            -e PID_NS -e UTS_NS -e IPC_NS -e NET_NS -e USER_NS \
+            -e DEVTMPFS -e DEVTMPFS_MOUNT -e OVERLAY_FS \
+            -e VETH -e MACVLAN -e BRIDGE -e BRIDGE_NETFILTER -e TUN \
+            -e CGROUP_DEVICE -e CGROUP_PIDS -e CGROUP_SCHED -e CFS_BANDWIDTH \
+            -e MEMCG -e BLK_CGROUP -e SECCOMP -e SECCOMP_FILTER
+          if [ -n "${{ inputs.localversion }}" ]; then
+            ./scripts/config --file .config --set-str LOCALVERSION "${{ inputs.localversion }}"
+          fi
+          make olddefconfig
+          # El CI parchea archivos: evitar el sufijo -dirty en el vermagic.
+          sed -i "s/printf '%s' -dirty/:/" scripts/setlocalversion
+          grep -E '^CONFIG_(LOCALVERSION|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS)=' .config | tee config-report.txt
+
+      - name: Compilar Image.gz + dtbs (auto-cura de includes)
+        working-directory: kernel
+        run: |
+          set -uo pipefail
+          export ARCH=arm64 LLVM=1
+          FLAGS="-Wno-error ${HEADER_DEFS:-}"
+          : > include-fixes.log
+          ok=0
+          for attempt in $(seq 1 25); do
+            echo "===== intento ${attempt}: KCFLAGS='${FLAGS}' ====="
+            if make -j"$(nproc)" KCFLAGS="$FLAGS" Image.gz dtbs 2>&1 | tee "build-attempt-${attempt}.log"; then
+              ok=1
+              echo "build ok en intento ${attempt}"
+              break
+            fi
+            hdrs=$(grep -ohE "'[^']+' file not found" "build-attempt-${attempt}.log" \
+                    | sed -E "s/^'([^']+)' file not found$/\1/" | sort -u)
+            if [ -z "${hdrs:-}" ]; then
+              echo "::error::fallo sin diagnóstico de header faltante"
+              tail -n 80 "build-attempt-${attempt}.log"
+              exit 1
+            fi
+            added=0
+            while IFS= read -r hdr; do
+              [ -z "$hdr" ] && continue
+              echo "header faltante: ${hdr}"
+              mapfile -t hits < <(find . -name "$hdr" -not -path './.git/*' 2>/dev/null | sort)
+              if [ "${#hits[@]}" -eq 0 ]; then
+                echo "::error::el header '$hdr' no existe en el árbol"
+                exit 1
+              fi
+              pick=""
+              for h in "${hits[@]}"; do
+                case "$h" in *mt6853*|*mt6877*) pick=$(dirname "$h"); break;; esac
+              done
+              [ -n "$pick" ] || pick=$(dirname "${hits[0]}")
+              case " $FLAGS " in
+                *" -I$PWD/$pick "*) echo "  ya estaba: $pick"; continue;;
+              esac
+              FLAGS="$FLAGS -I$PWD/$pick"
+              added=$((added + 1))
+              echo "  + -I$pick" | tee -a include-fixes.log
+            done <<< "$hdrs"
+            if [ "$added" -eq 0 ]; then
+              echo "::error::no se pudo añadir ningún include nuevo"
+              tail -n 80 "build-attempt-${attempt}.log"
+              exit 1
+            fi
+          done
+          [ "$ok" -eq 1 ]
+          cp -f "build-attempt-${attempt}.log" build.log
+          ls -lh arch/arm64/boot/Image.gz
+
+      - name: DTB combinado (sin overlay, fallback)
+        working-directory: kernel
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          export ARCH=arm64 LLVM=1
+          make -j"$(nproc)" KCFLAGS="-Wno-error ${HEADER_DEFS:-}" \
+            arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
+          ls -lh arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
+
+      - name: Verificar build
+        working-directory: kernel
+        run: |
+          set -euo pipefail
+          test -s arch/arm64/boot/Image.gz
+          test -s arch/arm64/boot/dts/mediatek/mt6877.dtb
+          test -s arch/arm64/boot/dts/mediatek/ruby.dtbo
+          echo "--- versión en la Image ---"
+          strings -a arch/arm64/boot/Image | grep -m1 -E '^6\.6\.[0-9]+' || true
+          echo "--- archivos ---"
+          ls -lh arch/arm64/boot/Image.gz \
+                 arch/arm64/boot/dts/mediatek/mt6877.dtb \
+                 arch/arm64/boot/dts/mediatek/ruby.dtbo
+
+      - name: Empaquetar AnyKernel3 + dtbo.img
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          KSHORT=$(git -C kernel rev-parse --short=12 HEAD)
+          TAG="ruby66-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}-${KSHORT}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "KSHORT=$KSHORT" >> "$GITHUB_ENV"
+
+          mkdir -p out
+          cp kernel/arch/arm64/boot/Image.gz out/
+          cp kernel/arch/arm64/boot/dts/mediatek/mt6877.dtb out/
+          cp kernel/arch/arm64/boot/dts/mediatek/ruby.dtbo out/
+          cp kernel/.config "out/config-${KSHORT}"
+          if [ -f kernel/arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb ]; then
+            cp kernel/arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb out/
+          fi
+
+          git clone --depth=1 -b ruby_dev https://github.com/DXRN-MoonWake/AnyKernel3 ak3
+
+          pack() {
+            local variant="$1" dtb="$2"
+            [ -f "$dtb" ] || return 0
+            rm -rf "ak3-$variant"
+            cp -a ak3 "ak3-$variant"
+            cp -f out/Image.gz "ak3-$variant/Image.gz"
+            cp -f "$dtb" "ak3-$variant/dtb"
+            ( cd "ak3-$variant" && zip -q -r9 "../out/AnyKernel3-${TAG}-${variant}.zip" . -x '*.git*' )
+            echo "empaquetado AnyKernel3-${TAG}-${variant}.zip"
+          }
+          pack "miui-base-dtb" out/mt6877.dtb
+          pack "miui-combined-dtb" out/ruby-mt6877-combined.dtb
+
+          gh api "repos/LineageOS/android_system_libufdt/contents/utils/src/mkdtboimg.py?ref=lineage-24.0" \
+            --jq '.content' | base64 -d > /tmp/mkdtboimg.py
+          python3 /tmp/mkdtboimg.py create --page_size=2048 "out/dtbo-${TAG}.img" out/ruby.dtbo
+
+          ( cd out && sha256sum ./* > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
+          ls -lh out/
+
+      - name: Subir artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: "ruby66-flashable-${{ env.TAG }}"
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ruby 6.6 flasheable · $TAG" \
+            --notes "Kernel 6.6.143 desde RubyxLabs/android_kernel_xiaomi_mt6877 @ ${KSHORT}.
+
+          Incluye:
+          - AnyKernel3 (base dtb + ruby.dtbo): usar con OrangeFox/recovery.
+          - AnyKernel3 (dtb combinado): fallback sin overlay.
+          - dtbo-*.img: overlays Ruby 6.6 para \`fastboot flash dtbo\`.
+          - Image.gz, mt6877.dtb, ruby.dtbo, .config y SHA256SUMS.
+
+          Respaldá boot/dtbo/vbmeta antes de flashear. Ver README del repo." \
+            --prerelease
