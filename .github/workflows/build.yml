@@ -12,12 +12,16 @@ on:
         default: "lineage-24.0"
         required: true
       ksu:
-        description: "Integrar KernelSU-Next (con Magisk NO hace falta)"
+        description: "Integrar KernelSU-Next (con APatch/Magisk NO hace falta)"
         type: choice
         options:
           - "false"
           - "true"
         default: "false"
+      ksu_ref:
+        description: "Commit/tag de KernelSU-Next (vacío = último tag)"
+        default: ""
+        required: false
       localversion:
         description: "CONFIG_LOCALVERSION (sufijo visible en uname -r)"
         default: "-ruby66-miui"
@@ -66,12 +70,21 @@ jobs:
       - name: KernelSU-Next (opcional)
         if: ${{ inputs.ksu == 'true' }}
         working-directory: kernel
+        env:
+          KSU_REF: ${{ inputs.ksu_ref }}
         run: |
           set -euo pipefail
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s
-          test -d drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
+            -o /tmp/ksu-setup.sh
+          if [ -n "${KSU_REF:-}" ]; then
+            bash /tmp/ksu-setup.sh "$KSU_REF"
+          else
+            bash /tmp/ksu-setup.sh
+          fi
+          test -d drivers/kernelsu || { echo "no se enlazó drivers/kernelsu"; exit 1; }
           grep -q kernelsu drivers/Makefile
-          sed -i 's/ -dirty//g' scripts/setlocalversion
+          grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig
+          echo "KSU_ENABLED=true" >> "$GITHUB_ENV"
 
       - name: Arreglos del snapshot publicado (audio DSP + IOMMU MTK)
         working-directory: kernel
@@ -108,19 +121,26 @@ jobs:
           ./scripts/config --file .config \
             -d MTK_AUDIODSP_SUPPORT -d SND_SOC_MTK_AUDIO_DSP -d WERROR
           ./scripts/config --file .config \
-            -e SYSVIPC -e POSIX_MQUEUE -e NAMESPACES \
+            -e SYSCTL -e SYSVIPC -e POSIX_MQUEUE -e NAMESPACES \
             -e PID_NS -e UTS_NS -e IPC_NS -e NET_NS -e USER_NS \
-            -e DEVTMPFS -e DEVTMPFS_MOUNT -e OVERLAY_FS \
+            -e DEVTMPFS -e DEVTMPFS_MOUNT -e OVERLAY_FS -e TMPFS_XATTR \
             -e VETH -e MACVLAN -e BRIDGE -e BRIDGE_NETFILTER -e TUN \
-            -e CGROUP_DEVICE -e CGROUP_PIDS -e CGROUP_SCHED -e CFS_BANDWIDTH \
-            -e MEMCG -e BLK_CGROUP -e SECCOMP -e SECCOMP_FILTER
+            -e CGROUPS -e CGROUP_DEVICE -e CGROUP_PIDS -e CGROUP_SCHED \
+            -e FAIR_GROUP_SCHED -e CFS_BANDWIDTH -e MEMCG -e BLK_CGROUP \
+            -e SECCOMP -e SECCOMP_FILTER
+          if [ "${{ inputs.ksu }}" = "true" ]; then
+            ./scripts/config --file .config -e KSU
+          fi
           if [ -n "${{ inputs.localversion }}" ]; then
             ./scripts/config --file .config --set-str LOCALVERSION "${{ inputs.localversion }}"
           fi
           make olddefconfig
           # El CI parchea archivos: evitar el sufijo -dirty en el vermagic.
           sed -i "s/printf '%s' -dirty/:/" scripts/setlocalversion
-          grep -E '^CONFIG_(LOCALVERSION|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS)=' .config | tee config-report.txt
+          grep -E '^CONFIG_(LOCALVERSION|KSU|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS)=' .config | tee config-report.txt
+          if [ "${{ inputs.ksu }}" = "true" ]; then
+            grep -q '^CONFIG_KSU=y' .config || { echo "::error::CONFIG_KSU no quedó activo"; exit 1; }
+          fi
 
       - name: Compilar Image.gz + dtbs (auto-cura de includes)
         working-directory: kernel
@@ -194,6 +214,11 @@ jobs:
           test -s arch/arm64/boot/dts/mediatek/ruby.dtbo
           echo "--- versión en la Image ---"
           strings -a arch/arm64/boot/Image | grep -m1 -E '^6\.6\.[0-9]+' || true
+          if [ -n "${KSU_ENABLED:-}" ]; then
+            echo "--- KernelSU ---"
+            strings -a arch/arm64/boot/Image | grep -m1 '^/data/adb/ksud$' \
+              || { echo "::error::CONFIG_KSU=y pero no hay rastro de ksud en la Image"; exit 1; }
+          fi
           echo "--- archivos ---"
           ls -lh arch/arm64/boot/Image.gz \
                  arch/arm64/boot/dts/mediatek/mt6877.dtb \
@@ -205,7 +230,9 @@ jobs:
         run: |
           set -euo pipefail
           KSHORT=$(git -C kernel rev-parse --short=12 HEAD)
-          TAG="ruby66-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}-${KSHORT}"
+          VARIANT="vanilla"
+          [ -n "${KSU_ENABLED:-}" ] && VARIANT="ksu"
+          TAG="ruby66-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}-${KSHORT}-${VARIANT}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "KSHORT=$KSHORT" >> "$GITHUB_ENV"
 
