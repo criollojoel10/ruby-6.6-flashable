@@ -60,6 +60,15 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      # ccache: cache persistente entre runs y entre las dos variantes.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 4G
+      CCACHE_COMPRESS: "true"
+      CCACHE_COMPRESSLEVEL: "6"
+      CCACHE_SLOPPINESS: "time_macros,include_file_ctime,include_file_mtime,file_stat_matches"
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      SOURCE_DATE_EPOCH: "1700000000"
     steps:
       - name: Checkout kernel (RubyxLabs)
         uses: actions/checkout@v4
@@ -73,6 +82,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: packaging
+
+      - name: ccache (restaurar)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.variant }}-${{ inputs.kernel_ref }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.variant }}-${{ inputs.kernel_ref }}-
+            ccache-${{ matrix.variant }}-
 
       - name: Dependencias
         run: |
@@ -195,7 +213,7 @@ jobs:
           ok=0
           for attempt in $(seq 1 25); do
             echo "===== intento ${attempt}: KCFLAGS='${FLAGS}' ====="
-            if make -k -j"$(nproc)" KCFLAGS="$FLAGS" Image.gz dtbs 2>&1 | tee "build-attempt-${attempt}.log"; then
+            if make -k -j"$(nproc)" CC="ccache clang" KCFLAGS="$FLAGS" Image.gz dtbs 2>&1 | tee "build-attempt-${attempt}.log"; then
               ok=1
               echo "build ok en intento ${attempt}"
               break
@@ -240,6 +258,8 @@ jobs:
           done
           [ "$ok" -eq 1 ]
           cp -f "build-attempt-${attempt}.log" build.log
+          echo "--- ccache ---"
+          ccache -s || true
           ls -lh arch/arm64/boot/Image.gz
 
       - name: DTB combinado (sin overlay, fallback)
@@ -248,7 +268,8 @@ jobs:
         run: |
           set -euo pipefail
           export ARCH=arm64 LLVM=1
-          make -j"$(nproc)" KCFLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}" \
+          make -j"$(nproc)" CC="ccache clang" \
+            KCFLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}" \
             arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
           ls -lh arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
 
