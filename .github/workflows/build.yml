@@ -395,7 +395,8 @@ jobs:
           echo "release: $TAG"
           # aplanar; los crudos llevan la variante en el nombre para no pisarse
           for d in dl/*/; do
-            v=$(basename "$d"); v=${v#ruby66-}; v=${v%%-ruby66-*}
+            v=$(basename "$d"); v=${v#ruby66-}; v=${v#flashable-}; v=${v%%-ruby66-*}
+            case "$v" in vanilla|ksu) ;; *) v=kernel ;; esac
             for f in "$d"*; do
               [ -f "$f" ] || continue
               b=$(basename "$f")
