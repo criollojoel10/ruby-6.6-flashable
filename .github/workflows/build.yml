@@ -112,6 +112,26 @@ jobs:
             echo 'HEADER_DEFS=-DCONFIG_MTK_IOMMU_PGTABLE_EXT=32' >> "$GITHUB_ENV"
           fi
 
+          # Includes del mismo directorio que el snapshot no pone y que el
+          # auto-cura encuentra a ciegas. Se siembran los correctos para ruby
+          # (MT6877) y así se evita compilar con headers de otro SoC:
+          #  - mdp: el Makefile mapea MT6877 -> mt6853 a propósito.
+          #  - lpm/debug: mt6877.
+          #  - vow: la versión sale de CONFIG_MTK_VOW_DSP_VERSION (ver02).
+          SEED="-I$PWD/drivers/misc/mediatek/mdp/mt6853"
+          SEED="$SEED -I$PWD/drivers/misc/mediatek/lpm/modules/debug/mt6877"
+          SEED="$SEED -I$PWD/drivers/power/supply/mediatek/battery"
+          SEED="$SEED -I$PWD/drivers/misc/mediatek/debug_latch/plat_dbg_info"
+          SEED="$SEED -I$PWD/drivers/cpuidle"
+          VOW=drivers/misc/mediatek/vow/ver02
+          if [ -d "$VOW" ]; then
+            SEED="$SEED -I$PWD/$VOW"
+            grep -qF "I\$(srctree)/$VOW" "$VOW/Makefile" 2>/dev/null || \
+              echo "ccflags-y += -I\$(srctree)/$VOW" >> "$VOW/Makefile"
+          fi
+          echo "SEED_FLAGS=$SEED" >> "$GITHUB_ENV"
+          echo "siembra de includes: $SEED"
+
       - name: Configurar (ruby_defconfig)
         working-directory: kernel
         run: |
@@ -147,12 +167,12 @@ jobs:
         run: |
           set -uo pipefail
           export ARCH=arm64 LLVM=1
-          FLAGS="-Wno-error ${HEADER_DEFS:-}"
+          FLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}"
           : > include-fixes.log
           ok=0
           for attempt in $(seq 1 25); do
             echo "===== intento ${attempt}: KCFLAGS='${FLAGS}' ====="
-            if make -j"$(nproc)" KCFLAGS="$FLAGS" Image.gz dtbs 2>&1 | tee "build-attempt-${attempt}.log"; then
+            if make -k -j"$(nproc)" KCFLAGS="$FLAGS" Image.gz dtbs 2>&1 | tee "build-attempt-${attempt}.log"; then
               ok=1
               echo "build ok en intento ${attempt}"
               break

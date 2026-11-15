@@ -142,7 +142,7 @@ fastboot flash dtbo dtbo-hybrid-<TAG>.img
 Verificación:
 
 ```sh
-uname -r   # 6.6.143-ruby66-miui-g<hash>
+uname -r   # 6.6.143-android15-8-4k-Singularity-ruby66-g<hash>
 ```
 
 ## Logs cuando algo falla
