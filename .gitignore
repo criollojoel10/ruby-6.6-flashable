@@ -1,0 +1,5 @@
+dl/
+boot-6.6-*.img
+dtbo-hybrid-*.img
+AnyKernel3-*.zip
+SHA256SUMS-flashable-*
