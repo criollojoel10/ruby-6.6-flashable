@@ -3,6 +3,9 @@ name: "Build ruby 6.6 flashable (universal: MIUI/AOSP, vanilla/KSU)"
 # Kernel 6.6.143 de RubyxLabs (lineage-24.0) empaquetado al estilo MoonWake:
 # AnyKernel3 (parchea el boot existente y conserva SU ramdisk, sea MIUI o AOSP) +
 # dtbo.img. Pensado para ruby/rubyx (Redmi Note 12 Pro/Pro+ 5G, MT6877).
+#
+# Un solo run compila las dos variantes con matriz (vanilla y KernelSU-Next) y
+# publica un único release con todo.
 
 on:
   workflow_dispatch:
@@ -11,27 +14,50 @@ on:
         description: "Ref de RubyxLabs/android_kernel_xiaomi_mt6877"
         default: "lineage-24.0"
         required: true
-      ksu:
-        description: "Integrar KernelSU-Next (dejalo en false si el root va a ser APatch)"
+      variants:
+        description: "Variantes a compilar"
         type: choice
         options:
-          - "false"
-          - "true"
-        default: "false"
+          - both
+          - vanilla
+          - ksu
+        default: both
       ksu_ref:
         description: "Commit/tag de KernelSU-Next (vacío = último tag)"
         default: ""
         required: false
-      localversion:
-        description: "CONFIG_LOCALVERSION (sufijo visible en uname -r)"
-        default: "-ruby66-miui"
-        required: false
+      make_release:
+        description: "Publicar un release con lo compilado"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
 
 jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          VARIANTS: ${{ inputs.variants }}
+        run: |
+          set -euo pipefail
+          case "${VARIANTS:-both}" in
+            vanilla) j='[{"variant":"vanilla","ksu":"false","localversion":"-ruby66"}]' ;;
+            ksu)     j='[{"variant":"ksu","ksu":"true","localversion":"-ruby66-ksu"}]' ;;
+            *)       j='[{"variant":"vanilla","ksu":"false","localversion":"-ruby66"},{"variant":"ksu","ksu":"true","localversion":"-ruby66-ksu"}]' ;;
+          esac
+          echo "matrix={\"include\":$j}" >> "$GITHUB_OUTPUT"
+          echo "matriz: {\"include\":$j}"
+
   build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -67,8 +93,8 @@ jobs:
           clang --version | head -n1
           ld.lld --version | head -n1
 
-      - name: KernelSU-Next (opcional)
-        if: ${{ inputs.ksu == 'true' }}
+      - name: KernelSU-Next (sólo variante ksu)
+        if: ${{ matrix.ksu == 'true' }}
         working-directory: kernel
         env:
           KSU_REF: ${{ inputs.ksu_ref }}
@@ -84,9 +110,8 @@ jobs:
           test -d drivers/kernelsu || { echo "no se enlazó drivers/kernelsu"; exit 1; }
           grep -q kernelsu drivers/Makefile
           grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig
-          echo "KSU_ENABLED=true" >> "$GITHUB_ENV"
 
-      - name: Arreglos del snapshot publicado (audio DSP + IOMMU MTK)
+      - name: Arreglos del snapshot publicado (audio DSP + IOMMU MTK + includes)
         working-directory: kernel
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,17 +173,15 @@ jobs:
             -e CGROUPS -e CGROUP_DEVICE -e CGROUP_PIDS -e CGROUP_SCHED \
             -e FAIR_GROUP_SCHED -e CFS_BANDWIDTH -e MEMCG -e BLK_CGROUP \
             -e SECCOMP -e SECCOMP_FILTER
-          if [ "${{ inputs.ksu }}" = "true" ]; then
+          if [ "${{ matrix.ksu }}" = "true" ]; then
             ./scripts/config --file .config -e KSU
           fi
-          if [ -n "${{ inputs.localversion }}" ]; then
-            ./scripts/config --file .config --set-str LOCALVERSION "${{ inputs.localversion }}"
-          fi
+          ./scripts/config --file .config --set-str LOCALVERSION "${{ matrix.localversion }}"
           make olddefconfig
           # El CI parchea archivos: evitar el sufijo -dirty en el vermagic.
           sed -i "s/printf '%s' -dirty/:/" scripts/setlocalversion
           grep -E '^CONFIG_(LOCALVERSION|KSU|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS|KALLSYMS|KALLSYMS_ALL|KPROBES|CFI_CLANG)=' .config | tee config-report.txt
-          if [ "${{ inputs.ksu }}" = "true" ]; then
+          if [ "${{ matrix.ksu }}" = "true" ]; then
             grep -q '^CONFIG_KSU=y' .config || { echo "::error::CONFIG_KSU no quedó activo"; exit 1; }
           fi
 
@@ -195,7 +218,11 @@ jobs:
               fi
               pick=""
               for h in "${hits[@]}"; do
-                case "$h" in *mt6853*|*mt6877*) pick=$(dirname "$h"); break;; esac
+                case "$h" in *mt6877*) pick=$(dirname "$h"); break;; esac
+              done
+              for h in "${hits[@]}"; do
+                [ -n "$pick" ] && break
+                case "$h" in *mt6853*|*mt6833*) pick=$(dirname "$h"); break;; esac
               done
               [ -n "$pick" ] || pick=$(dirname "${hits[0]}")
               case " $FLAGS " in
@@ -221,7 +248,7 @@ jobs:
         run: |
           set -euo pipefail
           export ARCH=arm64 LLVM=1
-          make -j"$(nproc)" KCFLAGS="-Wno-error ${HEADER_DEFS:-}" \
+          make -j"$(nproc)" KCFLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}" \
             arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
           ls -lh arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
 
@@ -234,7 +261,7 @@ jobs:
           test -s arch/arm64/boot/dts/mediatek/ruby.dtbo
           echo "--- versión en la Image ---"
           strings -a arch/arm64/boot/Image | grep -m1 -E '^6\.6\.[0-9]+' || true
-          if [ -n "${KSU_ENABLED:-}" ]; then
+          if [ "${{ matrix.ksu }}" = "true" ]; then
             echo "--- KernelSU ---"
             strings -a arch/arm64/boot/Image | grep -m1 '^/data/adb/ksud$' \
               || { echo "::error::CONFIG_KSU=y pero no hay rastro de ksud en la Image"; exit 1; }
@@ -250,8 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           KSHORT=$(git -C kernel rev-parse --short=12 HEAD)
-          VARIANT="vanilla"
-          [ -n "${KSU_ENABLED:-}" ] && VARIANT="ksu"
+          VARIANT="${{ matrix.variant }}"
           TAG="ruby66-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}-${KSHORT}-${VARIANT}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "KSHORT=$KSHORT" >> "$GITHUB_ENV"
@@ -268,14 +294,14 @@ jobs:
           git clone --depth=1 -b ruby_dev https://github.com/DXRN-MoonWake/AnyKernel3 ak3
 
           pack() {
-            local variant="$1" dtb="$2"
+            local kind="$1" dtb="$2"
             [ -f "$dtb" ] || return 0
-            rm -rf "ak3-$variant"
-            cp -a ak3 "ak3-$variant"
-            cp -f out/Image.gz "ak3-$variant/Image.gz"
-            cp -f "$dtb" "ak3-$variant/dtb"
-            ( cd "ak3-$variant" && zip -q -r9 "../out/AnyKernel3-${TAG}-${variant}.zip" . -x '*.git*' )
-            echo "empaquetado AnyKernel3-${TAG}-${variant}.zip"
+            rm -rf "ak3-$kind"
+            cp -a ak3 "ak3-$kind"
+            cp -f out/Image.gz "ak3-$kind/Image.gz"
+            cp -f "$dtb" "ak3-$kind/dtb"
+            ( cd "ak3-$kind" && zip -q -r9 "../out/AnyKernel3-${TAG}-${kind}.zip" . -x '*.git*' )
+            echo "empaquetado AnyKernel3-${TAG}-${kind}.zip"
           }
           pack "base-dtb" out/mt6877.dtb
           pack "combined-dtb" out/ruby-mt6877-combined.dtb
@@ -298,32 +324,59 @@ jobs:
           ( cd out && sha256sum ./* > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
           ls -lh out/
 
-      - name: Subir artefactos
+      - name: Subir artefacto de la variante
         uses: actions/upload-artifact@v4
         with:
-          name: "ruby66-flashable-${{ env.TAG }}"
+          name: "ruby66-${{ matrix.variant }}-${{ env.TAG }}"
           path: out/
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publicar release
+  release:
+    needs: [setup, build]
+    if: ${{ always() && needs.build.result != 'failure' && github.event.inputs.make_release != 'false' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout del empaquetado
+        uses: actions/checkout@v4
+
+      - name: Bajar artefactos de todas las variantes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" out/* \
+          mkdir -p dl
+          gh run download "${{ github.run_id }}" --repo "$GITHUB_REPOSITORY" -D dl
+          find dl -maxdepth 3 -type f -printf '%10s  %p\n' | sort -k2
+
+      - name: Publicar release único
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          KSHORT=$(gh api "repos/RubyxLabs/android_kernel_xiaomi_mt6877/commits/${{ inputs.kernel_ref }}" \
+                    --jq '.sha' | cut -c1-12)
+          TAG="ruby66-$(date -u +%Y%m%d)-${{ github.run_number }}-${KSHORT}"
+          echo "release: $TAG"
+          # aplanar: un zip/nombre por variante ya viene en el nombre del archivo
+          find dl -type f -exec cp -f {} . \;
+          ( sha256sum ./*.zip ./*.img ./*.dtb ./*.dtbo ./config-* > "SHA256SUMS-${TAG}" ) 2>/dev/null || true
+          gh release create "$TAG" $(ls ./*.zip ./*.img ./*.dtb ./*.dtbo ./config-* "SHA256SUMS-${TAG}" 2>/dev/null | sort -u) \
             --repo "$GITHUB_REPOSITORY" \
-            --title "ruby 6.6 flasheable · $TAG" \
-            --notes "Kernel 6.6.143 desde RubyxLabs/android_kernel_xiaomi_mt6877 @ ${KSHORT}.
+            --title "ruby 6.6 flasheable (vanilla + KSU) · $TAG" \
+            --notes "Kernel 6.6 desde RubyxLabs/android_kernel_xiaomi_mt6877 @ ${KSHORT}.
 
-          Incluye:
-          - AnyKernel3 (base dtb): **universal**, probar primero. Conserva el ramdisk y el dtbo que ya tenga el equipo (MIUI o AOSP).
-          - AnyKernel3 (dtb combinado): fallback con el DTB ya fusionado, sin overlay.
-          - dtbo-*.img: overlays Ruby 6.6 (estilo Lineage) para flashear dtbo.
-          - dtbo-hybrid-*.img: \`ruby.dtbo\` 6.6 + extras del dtbo de MIUI
-            (atag,videolfb y GPIO del mt6360). Recomendado si el zip base
-            arranca pero falla WiFi/consys.
-          - Image.gz, mt6877.dtb, ruby.dtbo, .config y SHA256SUMS.
+          Variantes compiladas: ${{ inputs.variants }}.
 
-          Respaldá boot/dtbo/vbmeta antes de flashear. Ver README del repo." \
+          - AnyKernel3-*-base-dtb.zip: **universal** (MIUI y AOSP/A17); conserva
+            el ramdisk y el dtbo del equipo.
+          - AnyKernel3-*-combined-dtb.zip: fallback con el DTB ya fusionado.
+          - dtbo-hybrid-*.img: overlay 6.6 + extras del dtbo de MIUI.
+          - Image.gz, mt6877.dtb, ruby.dtbo, config-* y SHA256SUMS.
+
+          Root: la variante vanilla se parchea con APatch; la ksu trae
+          KernelSU-Next (no se mezclan). Logs: /sys/fs/pstore/console-ramoops-0.
+
+          Ver docs/UNIVERSAL.md, docs/FLASH-CARD.md y docs/DEVICE-STATE.md." \
             --prerelease
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'

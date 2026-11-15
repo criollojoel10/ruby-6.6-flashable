@@ -186,8 +186,14 @@ fastboot reboot
 GitHub → Actions → **Build ruby 6.6 flashable (MIUI/HyperOS)** → *Run workflow*.
 
 - `kernel_ref`: `lineage-24.0` (o un commit fijo).
-- `ksu`: `false` si el root va a ser APatch (recomendado). `true` integra KernelSU-Next.
-- `localversion`: sufijo de `uname -r`.
+- `variants`: `both` (default, compila vanilla + KSU en un solo run con matriz),
+  `vanilla` o `ksu`.
+- `ksu_ref`: commit/tag de KernelSU-Next (vacío = último tag).
+- `make_release`: publica un release único con todo lo compilado.
+
+Un run con `both` lanza dos jobs en paralelo (cada variante es un kernel
+distinto porque `CONFIG_KSU` cambia el binario) y el job `release` junta los
+artefactos de las dos en un solo release.
 
 Cada build publica un **release prerelease** con todos los archivos, además del
 artifact de Actions.
