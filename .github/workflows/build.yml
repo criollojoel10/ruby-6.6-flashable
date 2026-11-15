@@ -1,8 +1,8 @@
-name: "Build ruby 6.6 flashable (MIUI/HyperOS)"
+name: "Build ruby 6.6 flashable (universal: MIUI/AOSP, vanilla/KSU)"
 
 # Kernel 6.6.143 de RubyxLabs (lineage-24.0) empaquetado al estilo MoonWake:
-# AnyKernel3 (parchea el boot existente y conserva el ramdisk de MIUI) +
-# dtbo.img. Pensado para rubyx/ruby (Redmi Note 12 Pro/Pro+ 5G, MT6877).
+# AnyKernel3 (parchea el boot existente y conserva SU ramdisk, sea MIUI o AOSP) +
+# dtbo.img. Pensado para ruby/rubyx (Redmi Note 12 Pro/Pro+ 5G, MT6877).
 
 on:
   workflow_dispatch:
@@ -257,8 +257,8 @@ jobs:
             ( cd "ak3-$variant" && zip -q -r9 "../out/AnyKernel3-${TAG}-${variant}.zip" . -x '*.git*' )
             echo "empaquetado AnyKernel3-${TAG}-${variant}.zip"
           }
-          pack "miui-base-dtb" out/mt6877.dtb
-          pack "miui-combined-dtb" out/ruby-mt6877-combined.dtb
+          pack "base-dtb" out/mt6877.dtb
+          pack "combined-dtb" out/ruby-mt6877-combined.dtb
 
           gh api "repos/LineageOS/android_system_libufdt/contents/utils/src/mkdtboimg.py?ref=lineage-24.0" \
             --jq '.content' | base64 -d > /tmp/mkdtboimg.py
@@ -297,8 +297,8 @@ jobs:
             --notes "Kernel 6.6.143 desde RubyxLabs/android_kernel_xiaomi_mt6877 @ ${KSHORT}.
 
           Incluye:
-          - AnyKernel3 (base dtb): **probar primero**. Conserva el dtbo stock de MIUI.
-          - AnyKernel3 (dtb combinado): fallback sin overlay.
+          - AnyKernel3 (base dtb): **universal**, probar primero. Conserva el ramdisk y el dtbo que ya tenga el equipo (MIUI o AOSP).
+          - AnyKernel3 (dtb combinado): fallback con el DTB ya fusionado, sin overlay.
           - dtbo-*.img: overlays Ruby 6.6 (estilo Lineage) para flashear dtbo.
           - dtbo-hybrid-*.img: \`ruby.dtbo\` 6.6 + extras del dtbo de MIUI
             (atag,videolfb y GPIO del mt6360). Recomendado si el zip base
