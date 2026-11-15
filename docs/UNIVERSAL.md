@@ -87,9 +87,10 @@ USER`), cgroups (`DEVICE/PIDS/SCHED/CFS_BANDWIDTH/MEMCG`), `OVERLAY_FS`,
 
 ## 6. Qué NO es universal
 
-- **Root**: APatch/Magisk y KernelSU-Next no conviven. La variante `ksu` trae
-  `CONFIG_KSU=y` y requiere el manager de KernelSU-Next; la vanilla arranca sin
-  root (APatch/Magisk se aplican después).
+- **Root**: acá el root es **APatch** (parchea el kernel). La variante `vanilla`
+  arranca sin root y se parchea con APatch usando el mismo `boot.img` como
+  entrada. La variante `ksu` trae `CONFIG_KSU=y` y **no** se puede combinar con
+  APatch. Magisk no se usa.
 - **Particiones**: el zip escribe sólo `boot` del slot activo. No toca `dtbo`,
   `vbmeta`, `vendor_boot` ni `super`.
 - **64K pages**: este kernel es 4K. Un ROM que exija 16K/64K no va a arrancar;

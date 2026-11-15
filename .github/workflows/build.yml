@@ -12,7 +12,7 @@ on:
         default: "lineage-24.0"
         required: true
       ksu:
-        description: "Integrar KernelSU-Next (con APatch/Magisk NO hace falta)"
+        description: "Integrar KernelSU-Next (dejalo en false si el root va a ser APatch)"
         type: choice
         options:
           - "false"
@@ -137,7 +137,7 @@ jobs:
           make olddefconfig
           # El CI parchea archivos: evitar el sufijo -dirty en el vermagic.
           sed -i "s/printf '%s' -dirty/:/" scripts/setlocalversion
-          grep -E '^CONFIG_(LOCALVERSION|KSU|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS)=' .config | tee config-report.txt
+          grep -E '^CONFIG_(LOCALVERSION|KSU|MTK_AUDIODSP_SUPPORT|SND_SOC_MTK_AUDIO_DSP|SYSVIPC|IPC_NS|PID_NS|KALLSYMS|KALLSYMS_ALL|KPROBES|CFI_CLANG)=' .config | tee config-report.txt
           if [ "${{ inputs.ksu }}" = "true" ]; then
             grep -q '^CONFIG_KSU=y' .config || { echo "::error::CONFIG_KSU no quedó activo"; exit 1; }
           fi

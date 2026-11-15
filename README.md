@@ -88,10 +88,26 @@ panel no funcionan: agrega los nodos 6.6 (`wifi@18000000`, `seninf_top`,
    → destino **Dtbo**.
 3. Reiniciá a sistema y verificá `uname -r`.
 
-AnyKernel3 conserva el ramdisk de MIUI (y el `.backup/.magisk` si había
-Magisk), reemplaza sólo kernel y `dtb`. **Con APatch el root se pierde**:
-APatch mete su parche en el kernel del `boot`, así que después de flashear hay
-que reabrir APatch y volver a parchear.
+AnyKernel3 conserva el ramdisk tal cual y reemplaza sólo kernel y `dtb`.
+
+### Root: APatch (recomendado)
+
+APatch parchea **el kernel** del `boot`, así que cualquier kernel nuevo arranca
+sin root. El flujo es de dos pasos y usa la variante **vanilla**:
+
+1. Flasheás `boot-6.6-miui-…img` (o el zip vanilla) y arrancás.
+2. Copiás el mismo `boot-6.6-miui-…img` a `/sdcard/Download`, abrís **APatch**,
+   *Install* → elegís ese `boot.img` → *Patch* (usa tu superkey) → te deja
+   `apatch_patched_….img`.
+3. Flasheás ese `apatch_patched_….img` en `boot` (OFOX → Install Image, o
+   `tools/flash-boot.sh`).
+
+Requisitos de APatch que este kernel cumple: `CONFIG_KALLSYMS=y`,
+`CONFIG_KALLSYMS_ALL=y`, `CONFIG_KPROBES=y`, kernel 6.6 (APatch soporta 3.18–6.12)
+y kCFI (`CONFIG_CFI_CLANG=y`, KernelPatch lo maneja desde 2025).
+
+**No uses Magisk.** Y no mezcles: la variante `ksu` ya trae KernelSU-Next y es
+alternativa a APatch, no complemento.
 
 Antes de reiniciar, limpiá pstore para que el log del intento sea el nuevo:
 
@@ -165,7 +181,7 @@ fastboot reboot
 GitHub → Actions → **Build ruby 6.6 flashable (MIUI/HyperOS)** → *Run workflow*.
 
 - `kernel_ref`: `lineage-24.0` (o un commit fijo).
-- `ksu`: `false` si usás Magisk (recomendado en MIUI). `true` integra KernelSU-Next.
+- `ksu`: `false` si el root va a ser APatch (recomendado). `true` integra KernelSU-Next.
 - `localversion`: sufijo de `uname -r`.
 
 Cada build publica un **release prerelease** con todos los archivos, además del
