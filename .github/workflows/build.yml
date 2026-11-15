@@ -286,7 +286,7 @@ jobs:
           cp kernel/arch/arm64/boot/Image.gz out/
           cp kernel/arch/arm64/boot/dts/mediatek/mt6877.dtb out/
           cp kernel/arch/arm64/boot/dts/mediatek/ruby.dtbo out/
-          cp kernel/.config "out/config-${KSHORT}"
+          cp kernel/.config "out/config-${KSHORT}-${VARIANT}"
           if [ -f kernel/arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb ]; then
             cp kernel/arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb out/
           fi
@@ -321,7 +321,7 @@ jobs:
           echo "fragmentos hybrid: $(grep -cE '^[[:space:]]+fragment@' out/hybrid.dts)"
           fdtget -p out/hybrid.dtb /__fixups__ | tr '\n' ' '; echo
 
-          ( cd out && sha256sum ./* > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
+          ( cd out && sha256sum ./* > "SHA256SUMS-${VARIANT}" && sha256sum -c "SHA256SUMS-${VARIANT}" >/dev/null )
           ls -lh out/
 
       - name: Subir artefacto de la variante
