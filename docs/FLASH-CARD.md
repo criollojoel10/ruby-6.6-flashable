@@ -26,12 +26,16 @@ uname -r    # 6.6.143-android15-8-4k-Singularity-ruby66-g<sha>
 
 ## 2. KSU (alternativa, sin APatch)
 
-1. OFOX → *Install* → `AnyKernel3-<tag>-base-dtb.zip` (variante `ksu`).
-2. Reiniciá e instalá el manager de KernelSU-Next.
+1. OFOX → *Install* → `AnyKernel3-<tag>-base-dtb.zip` (variante **ksu**), o
+   flasheá `boot-6.6-miui-<tag>-ksu.img` como imagen en **Boot**.
+2. Reiniciá e instalá el manager **KernelSU-Next v3.4.2**
+   (`KernelSU_Next_v3.4.2_33355-release.apk`, o la variante `-spoofed` si querés
+   que oculte el paquete). El kernel se compiló con el tag `next` actual, que es
+   v3.4.2; manager y kernel tienen que ser de la misma línea.
 3. `uname -r` debe terminar en `-ruby66-ksu-g<sha>`.
 
 No mezclar: si venías de APatch y flasheás la variante `ksu`, el root APatch
-desaparece (el kernel es otro).
+desaparece (el kernel es otro) y APatch no debe usarse sobre ese boot.
 
 ## 3. Universal (MIUI y AOSP A17)
 
