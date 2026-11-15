@@ -67,9 +67,16 @@ if [ -n "$AOSP" ]; then
 fi
 
 echo "== 2/3 dtbo híbrido =="
-dtc -I dtb -O dts -o "$work/ruby.dtbo.dts" "$DIR/ruby.dtbo"
+dtc -@ -I dtb -O dts -o "$work/ruby.dtbo.dts" "$DIR/ruby.dtbo"
 python3 "$HERE/merge-dtbo.py" "$work/ruby.dtbo.dts" "$OUT/dtb/miui-extras.dts" -o "$work/hybrid.dts"
 dtc -@ -I dts -O dtb -o "$work/hybrid.dtb" "$work/hybrid.dts"
+# Validación: el híbrido tiene que aplicar al dtb base y aportar videolfb/wifi.
+fdtoverlay -i "$DIR/mt6877.dtb" -o "$work/flat.dtb" "$work/hybrid.dtb" >/dev/null
+[ "$(fdtget "$work/flat.dtb" /chosen atag,videolfb-lcmname)" = "td4330_fhdp_dsi_cmd_auo_rt4831_drv" ] \
+  || { echo "el híbrido no aporta atag,videolfb-lcmname" >&2; exit 1; }
+fdtget "$work/flat.dtb" /seninf_top@1a004000 compatible >/dev/null
+fdtget -l "$work/flat.dtb" /wifi@18000000 >/dev/null
+echo "   híbrido verificado contra el dtb base (videolfb, seninf, wifi)"
 python3 "$MKDTBOIMG" create --page_size=2048 \
   "$OUT/dtbo-hybrid-${TAG}.img" "$work/hybrid.dtb"
 echo "   -> dtbo-hybrid-${TAG}.img ($(stat -c %s "$OUT/dtbo-hybrid-${TAG}.img") bytes)"

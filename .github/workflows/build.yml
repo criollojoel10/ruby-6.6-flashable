@@ -341,13 +341,16 @@ jobs:
           # MIUI trae en su dtbo stock (chosen/videolfb y GPIO del mt6360).
           # Si algo falla, se avisa y se publica el resto (no se pierde el zip).
           if (
-            dtc -I dtb -O dts -o out/ruby.dtbo.dts out/ruby.dtbo &&
+            dtc -@ -I dtb -O dts -o out/ruby.dtbo.dts out/ruby.dtbo &&
+            grep -q "target = <&" out/ruby.dtbo.dts &&
             python3 packaging/tools/merge-dtbo.py out/ruby.dtbo.dts \
               packaging/dtb/miui-extras.dts -o out/hybrid.dts &&
             dtc -@ -I dts -O dtb -o out/hybrid.dtb out/hybrid.dts && \
+            fdtoverlay -i out/mt6877.dtb -o /tmp/hybrid-flat.dtb out/hybrid.dtb &&
+            fdtget /tmp/hybrid-flat.dtb /chosen atag,videolfb-lcmname >/dev/null &&
+            fdtget /tmp/hybrid-flat.dtb /seninf_top@1a004000 compatible >/dev/null &&
             python3 /tmp/mkdtboimg.py create --page_size=2048 \
-              "out/dtbo-hybrid-${TAG}.img" out/hybrid.dtb &&
-            fdtget -p out/hybrid.dtb /__fixups__ >/dev/null
+              "out/dtbo-hybrid-${TAG}.img" out/hybrid.dtb
           ); then
             echo "dtbo híbrido ok: $(stat -c %s "out/dtbo-hybrid-${TAG}.img") bytes"
             echo "fragmentos hybrid: $(grep -cE '^[[:space:]]+fragment@' out/hybrid.dts)"
