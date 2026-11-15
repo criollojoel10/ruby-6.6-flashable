@@ -12,6 +12,7 @@
 #   STOCK_BOOT  boot stock del equipo (obligatoria)
 #   AOSP_BOOT   boot de Lineage/AOSP para el boot prearmado (opcional)
 #   DOWNLOAD    dir de descarga (default: ./dl/<run>)
+#   DRY_RUN=1   arma todo en local pero no sube al release
 set -euo pipefail
 
 RUN=${1:?run id}
@@ -78,6 +79,10 @@ echo "== release: $REL =="
 [ -f "$OUT/SHA256SUMS-flashable-${REL}" ] && assets+=("$OUT/SHA256SUMS-flashable-${REL}")
 
 printf '   %s\n' "${assets[@]##*/}"
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  echo "(DRY_RUN=1: no se sube nada a GitHub)"
+  exit 0
+fi
 if gh release view "$REL" -R "$REPO" >/dev/null 2>&1; then
   gh release upload "$REL" "${assets[@]}" -R "$REPO" --clobber
 else
