@@ -26,6 +26,12 @@ mkdir -p "$OUT/ak3"
 [ -f "$OUT/ak3/anykernel.sh" ] || { echo "el zip no tiene anykernel.sh" >&2; exit 1; }
 [ -f "$OUT/ak3/tools/ak3-core.sh" ] || { echo "el zip no tiene tools/ak3-core.sh" >&2; exit 1; }
 
+# En el equipo real setup_ak() resuelve /dev/block/by-name/boot_a. Acá
+# apuntamos a un archivo: se deja correr setup_ak (limpia placeholders, etc.)
+# y sólo se anula el abort de resolución de partición, en la copia.
+sed -i 's|abort "Unable to determine \$block partition. Aborting...";|:|' \
+  "$OUT/ak3/tools/ak3-core.sh"
+
 # kernel y dtb que trae el zip (cualquiera de los nombres que soporta AK3)
 KERNEL_SRC=""
 for k in Image.gz-dtb Image.gz Image Image-dtb zImage-dtb zImage; do
@@ -39,13 +45,15 @@ cp "$STOCK" "$OUT/fake-boot.img"
 size_mb=$(( $(stat -c %s "$STOCK") / 1048576 ))
 
 cat > "$OUT/run.sh" <<EOF
-set -e
+# sin set -e: ak3-core.sh tolera fallos de rmdir/rm en modo real
 cd "$OUT/ak3"
 home=\$PWD
 bin=\$home/tools
 export home bin
 kernel_filename="$KERNEL_SRC"
-block="$OUT/fake-boot.img bs=1048576 count=$size_mb"
+block="$OUT/fake-boot.img"
+customdd="bs=1048576 count=$size_mb"
+export customdd
 is_slot_device=1
 ramdisk_compression=auto
 patch_vbmeta_flag=auto
@@ -98,13 +106,33 @@ else
   fi
 fi
 
-if cmp -s "$OUT/verify/ramdisk.cpio" "$OUT/stock/ramdisk.cpio"; then
-  echo "  ramdisk : OK idéntico al original"
+# AK3 descomprime y vuelve a empaquetar el cpio: el stream cambia de orden y
+# las fechas cambian, así que se compara el contenido extraído (como root,
+# para no perder permisos ni symlinks).
+rm -rf "$OUT/rd-old" "$OUT/rd-new"
+mkdir -p "$OUT/rd-old" "$OUT/rd-new"
+if su -c id >/dev/null 2>&1; then
+  su -c "cd '$OUT/rd-old' && cpio -idm --quiet < '$OUT/stock/ramdisk.cpio' && \
+         cd '$OUT/rd-new' && cpio -idm --quiet < '$OUT/verify/ramdisk.cpio' && \
+         diff -r '$OUT/rd-old' '$OUT/rd-new'" > "$OUT/ramdisk-diff.txt" 2>&1
+  rdrc=$?
+  entries=$(su -c "find '$OUT/rd-new' | wc -l")
 else
-  echo "  ramdisk : DISTINTO del original (revisar)" >&2; fail=1
+  ( cd "$OUT" && cpio -itv < stock/ramdisk.cpio | awk '{print $1, $3, $NF}' | sort > rd-old.lst
+    cpio -itv < verify/ramdisk.cpio | awk '{print $1, $3, $NF}' | sort > rd-new.lst
+    diff -u rd-old.lst rd-new.lst ) > "$OUT/ramdisk-diff.txt" 2>&1
+  rdrc=$?
+  entries=$(wc -l < "$OUT/rd-old.lst")
+fi
+if [ "$rdrc" -eq 0 ]; then
+  echo "  ramdisk : OK mismo contenido ($entries entradas, sin diferencias)"
+else
+  echo "  ramdisk : DISTINTO del original (ver $OUT/ramdisk-diff.txt)" >&2
+  head -12 "$OUT/ramdisk-diff.txt" >&2
+  fail=1
 fi
 
-echo -n "  version : "
-gzip -dc "$OUT/verify/kernel" 2>/dev/null | strings | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+' || echo "(no encontrada)"
+ver=$(grep -a -m1 -oE '6\.6\.[0-9]+[^ ]* SMP[^ ]*' "$OUT/verify/kernel" 2>/dev/null || true)
+echo "  version : ${ver:-no encontrada}"
 
 exit $fail
