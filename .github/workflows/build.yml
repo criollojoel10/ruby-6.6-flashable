@@ -393,8 +393,20 @@ jobs:
                     --jq '.sha' | cut -c1-12)
           TAG="ruby66-$(date -u +%Y%m%d)-${{ github.run_number }}-${KSHORT}"
           echo "release: $TAG"
-          # aplanar: un zip/nombre por variante ya viene en el nombre del archivo
-          find dl -type f -exec cp -f {} . \;
+          # aplanar; los crudos llevan la variante en el nombre para no pisarse
+          for d in dl/*/; do
+            v=$(basename "$d"); v=${v#ruby66-}; v=${v%%-ruby66-*}
+            for f in "$d"*; do
+              [ -f "$f" ] || continue
+              b=$(basename "$f")
+              case "$b" in
+                Image.gz)   cp -f "$f" "Image-${v}.gz" ;;
+                mt6877.dtb) cp -f "$f" "mt6877-${v}.dtb" ;;
+                ruby.dtbo)  cp -f "$f" "ruby-${v}.dtbo" ;;
+                *)          cp -f "$f" "$b" ;;
+              esac
+            done
+          done
           ( sha256sum ./*.zip ./*.img ./*.dtb ./*.dtbo ./config-* > "SHA256SUMS-${TAG}" ) 2>/dev/null || true
           gh release create "$TAG" $(ls ./*.zip ./*.img ./*.dtb ./*.dtbo ./config-* "SHA256SUMS-${TAG}" 2>/dev/null | sort -u) \
             --repo "$GITHUB_REPOSITORY" \

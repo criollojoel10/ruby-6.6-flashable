@@ -62,8 +62,20 @@ for art in "${ARTS[@]}"; do
   done
   [ -f "$OUT/boot-6.6-aosp-${TAG}.img" ] && assets+=("$OUT/boot-6.6-aosp-${TAG}.img")
   for f in "$OUT"/AnyKernel3-"${TAG}"-*.zip; do [ -f "$f" ] && assets+=("$f"); done
+  # crudos con la variante en el nombre para que no colisionen en el release
+  raw_name() {
+    case "$(basename "$1")" in
+      Image.gz)   echo "$OUT/Image-${TAG}.gz" ;;
+      mt6877.dtb) echo "$OUT/mt6877-${TAG}.dtb" ;;
+      ruby.dtbo)  echo "$OUT/ruby-${TAG}.dtbo" ;;
+      *)          echo "$1" ;;
+    esac
+  }
   for f in "$art"/Image.gz "$art"/mt6877.dtb "$art"/ruby.dtbo "$art"/config-* "$art"/dtbo-*.img; do
-    [ -f "$f" ] && assets+=("$f")
+    [ -f "$f" ] || continue
+    dst=$(raw_name "$f")
+    [ "$dst" = "$f" ] || cp -f "$f" "$dst"
+    assets+=("$dst")
   done
 
   reltags+=("$(echo "$TAG" | sed -E 's/-(vanilla|ksu)$//')")
