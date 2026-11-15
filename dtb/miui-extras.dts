@@ -1,0 +1,42 @@
+/*
+ * Fragmentos del dtbo ORIGINAL de MIUI/HyperOS 2.0.16 (ruby, MT6877V) que el
+ * ruby.dtbo del kernel 6.6 no incluye:
+ *
+ *   fragment@0 -> &chosen      : atag,videolfb-* / lcmname que el kernel MTK
+ *                                (tanto 4.19 como 6.6) lee al arrancar.
+ *   fragment@2 -> &mt6360_pmu  : GPIO de interrupcion del PMIC de carga.
+ *
+ * Extraidos con `dtc -I dtb -O dts` del dtbo_a stock del dispositivo.
+ * Este archivo NO se compila solo: merge-dtbo.py lo concatena con el overlay
+ * del kernel para producir un dtbo hibrido MIUI + 6.6.
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+	model = "RUBY";
+	compatible = "mediatek,MT6877";
+
+	fragment@0 {
+		target = <&chosen>;
+
+		__overlay__ {
+			atag,videolfb-fb_base_l = "~`P";
+			atag,videolfb-fb_base_h = <0x00>;
+			atag,videolfb-islcmfound = <0x01>;
+			atag,videolfb-islcm_inited = <0x00>;
+			atag,videolfb-fps = <0x1770>;
+			atag,videolfb-vramSize = <0x1be0000>;
+			atag,videolfb-lcmname = "td4330_fhdp_dsi_cmd_auo_rt4831_drv";
+		};
+	};
+
+	fragment@1 {
+		target = <&mt6360_pmu>;
+
+		__overlay__ {
+			mt6360,intr_gpio_num = <0x04>;
+			mt6360,intr_gpio = <&pio>, <0x04 0x00>;
+		};
+	};
+};

@@ -39,6 +39,11 @@ jobs:
           path: kernel
           fetch-depth: 1
 
+      - name: Checkout del empaquetado (extras dtbo MIUI)
+        uses: actions/checkout@v4
+        with:
+          path: packaging
+
       - name: Dependencias
         run: |
           set -euo pipefail
@@ -232,6 +237,17 @@ jobs:
             --jq '.content' | base64 -d > /tmp/mkdtboimg.py
           python3 /tmp/mkdtboimg.py create --page_size=2048 "out/dtbo-${TAG}.img" out/ruby.dtbo
 
+          # dtbo hibrido: overlays 6.6 (wifi/consys/seninf) + los fragmentos que
+          # MIUI trae en su dtbo stock (chosen/videolfb y GPIO del mt6360).
+          dtc -I dtb -O dts -o out/ruby.dtbo.dts out/ruby.dtbo
+          python3 packaging/tools/merge-dtbo.py out/ruby.dtbo.dts \
+            packaging/dtb/miui-extras.dts -o out/hybrid.dts
+          dtc -@ -I dts -O dtb -o out/hybrid.dtb out/hybrid.dts
+          python3 /tmp/mkdtboimg.py create --page_size=2048 \
+            "out/dtbo-hybrid-${TAG}.img" out/hybrid.dtb
+          echo "fragmentos hybrid: $(grep -cE '^[[:space:]]+fragment@' out/hybrid.dts)"
+          fdtget -p out/hybrid.dtb /__fixups__ | tr '\n' ' '; echo
+
           ( cd out && sha256sum ./* > SHA256SUMS && sha256sum -c SHA256SUMS >/dev/null )
           ls -lh out/
 
@@ -254,9 +270,12 @@ jobs:
             --notes "Kernel 6.6.143 desde RubyxLabs/android_kernel_xiaomi_mt6877 @ ${KSHORT}.
 
           Incluye:
-          - AnyKernel3 (base dtb + ruby.dtbo): usar con OrangeFox/recovery.
+          - AnyKernel3 (base dtb): **probar primero**. Conserva el dtbo stock de MIUI.
           - AnyKernel3 (dtb combinado): fallback sin overlay.
-          - dtbo-*.img: overlays Ruby 6.6 para \`fastboot flash dtbo\`.
+          - dtbo-*.img: overlays Ruby 6.6 (estilo Lineage) para flashear dtbo.
+          - dtbo-hybrid-*.img: \`ruby.dtbo\` 6.6 + extras del dtbo de MIUI
+            (atag,videolfb y GPIO del mt6360). Recomendado si el zip base
+            arranca pero falla WiFi/consys.
           - Image.gz, mt6877.dtb, ruby.dtbo, .config y SHA256SUMS.
 
           Respaldá boot/dtbo/vbmeta antes de flashear. Ver README del repo." \

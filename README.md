@@ -42,49 +42,100 @@ su -c 'dd if=/dev/block/by-name/vbmeta_a of=/sdcard/vbmeta_a-stock.img'
 # slot b: repetir con boot_b, dtbo_b, vbmeta_b
 ```
 
-## Camino A — fastboot (recomendado)
+## Orden de pruebas (OrangeFox)
 
-Repackeá el `boot.img` stock con su ramdisk (Magisk incluido si ya lo tenías):
+Tenés OFOX y un `boot.img` de restauración, así que se puede iterar sin PC.
+Empezá por lo más conservador y avanzá sólo si falla:
+
+| # | Qué flashear | Qué conserva | Cuándo pasar al siguiente |
+|---|---|---|---|
+| 1 | `AnyKernel3-…-miui-base-dtb.zip` | ramdisk **y** `dtbo` de MIUI | no bootea / pantalla negra |
+| 2 | zip 1 + `dtbo-hybrid-….img` (dtbo) | ramdisk MIUI; dtbo = 6.6 + extras MIUI | sigue sin bootear |
+| 3 | `AnyKernel3-…-miui-combined-dtb.zip` | ramdisk MIUI | — |
+
+El zip 1 es el que replica a MoonWake: kernel + `dtb` base dentro de `boot`,
+sin tocar `dtbo`. Es el que tiene más chances de arrancar porque el `dtbo`
+stock de MIUI aplica limpio sobre el `dtb` 6.6 (verificado: los 63 `target`
+del overlay stock existen como labels en el `dtb` 6.6).
+
+El `dtbo-hybrid` es para cuando el equipo arranca pero **WiFi/consys** o el
+panel no funcionan: agrega los nodos 6.6 (`wifi@18000000`, `seninf_top`,
+`consys`) y a la vez conserva del `dtbo` de MIUI los `atag,videolfb-*` del
+`chosen` y el GPIO de IRQ del `mt6360`.
+
+## Camino A — OrangeFox (on-device, recomendado)
+
+1. OFOX → *Install* → elegí el zip de AnyKernel3 → *Swipe to flash*.
+2. Si vas a probar el híbrido: *Install* → *Install Image* → `dtbo-hybrid-….img`
+   → destino **Dtbo**.
+3. Reiniciá a sistema y verificá `uname -r`.
+
+AnyKernel3 conserva el ramdisk de MIUI (y el `.backup/.magisk` si había
+Magisk), reemplaza sólo kernel y `dtb`. **Con APatch el root se pierde**:
+APatch mete su parche en el kernel del `boot`, así que después de flashear hay
+que reabrir APatch y volver a parchear.
+
+Antes de reiniciar, limpiá pstore para que el log del intento sea el nuevo:
+
+```sh
+su -c 'rm -f /sys/fs/pstore/*'
+```
+
+## Camino B — fastboot, con `boot.img` ya armado
+
+Repack del `boot` stock conservando su ramdisk exacto (necesita `magiskboot`):
 
 ```sh
 ./tools/repack-boot.sh boot_a-stock.img Image.gz mt6877.dtb boot-6.6-miui.img
 ```
 
-Flasheo:
-
 ```sh
 fastboot flash boot boot-6.6-miui.img
-fastboot flash dtbo dtbo-<TAG>.img
-fastboot --disable-verity --disable-verification flash vbmeta vbmeta_a-stock.img
 fastboot reboot
 ```
 
-Orden alternativo si AVB se queja: primero `vbmeta`, después `boot` y `dtbo`.
+Sólo si vas a probar el dtbo híbrido:
 
-Verificación tras bootear:
+```sh
+fastboot flash dtbo dtbo-hybrid-<TAG>.img
+```
+
+Verificación:
 
 ```sh
 uname -r   # 6.6.143-ruby66-miui-g<hash>
 ```
 
-## Camino B — OrangeFox + AnyKernel3
+## Logs cuando algo falla
 
-1. Flasheá OrangeFox y luego "Flash current OrangeFox" (según la guía de MoonWake).
-2. Sideload del zip: `adb sideload AnyKernel3-…-miui-base-dtb.zip`.
-3. Flasheá el `dtbo-….img` (fastboot u OrangeFox → flash image → dtbo).
-4. Reiniciá.
+Ver [`docs/LOGS.md`](docs/LOGS.md). Resumen: LK ya le pasa a **todo** kernel
 
-Si el equipo queda en bootloop/pantalla negra con el zip base, probá
-`AnyKernel3-…-miui-combined-dtb.zip`.
+```
+ramoops.mem_address=0x48090000 ramoops.mem_size=0xe0000 ...
+```
 
-## Rescate
+y `ruby_defconfig` trae `CONFIG_PSTORE*`, así que el 6.6 escribe el panic en
+`/sys/fs/pstore/console-ramoops-0` sin parches. Limpiá pstore **antes** de
+flashear (no se sobreescribe solo) y leelo desde Android u OFOX.
+
+## Rescate — OrangeFox (sin PC)
+
+1. OFOX → *Install* → *Install Image* → `boot_a-stock.img` → **Boot**.
+2. Si tocaste el dtbo: `dtbo_a-stock.img` → **Dtbo**
+   (`vbmeta_a-stock.img` → **Vbmeta** sólo si AVB se queja).
+3. Reiniciá y volvé a parchear con APatch.
+
+Por fastboot:
 
 ```sh
 fastboot flash boot boot_a-stock.img
 fastboot flash dtbo dtbo_a-stock.img
-fastboot --disable-verity --disable-verification flash vbmeta vbmeta_a-stock.img
 fastboot reboot
 ```
+
+> Si el slot activo es `_b`, usá los `*_b`. En este equipo el `super` puede
+> tener sistema sólo en el slot activo: no cuentes con el otro slot como
+> rescate, contá con OFOX + los backups.
 
 ## Compilar
 
