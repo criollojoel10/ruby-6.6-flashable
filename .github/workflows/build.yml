@@ -32,7 +32,8 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: write   # crear el release
+  actions: read     # gh run download de los artifacts en el job release
 
 jobs:
   setup:
