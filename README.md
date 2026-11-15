@@ -2,8 +2,15 @@
 
 Kernel **6.6.143** para el **Redmi Note 12 Pro / Pro+ 5G / Discovery (`ruby`, MT6877V)**
 construido desde [`RubyxLabs/android_kernel_xiaomi_mt6877`](https://github.com/RubyxLabs/android_kernel_xiaomi_mt6877)
-(`lineage-24.0`) y empaquetado al estilo [`DXRN-MoonWake/KernelAction`](https://github.com/DXRN-MoonWake/KernelAction)
-para poder flashearlo sobre **MIUI / HyperOS** (Android 14, vendor 4.19) sin reemplazar el ramdisk.
+(`lineage-24.0`) y empaquetado al estilo [`DXRN-MoonWake/KernelAction`](https://github.com/DXRN-MoonWake/KernelAction).
+
+Es **universal**: el zip conserva el ramdisk que ya tenga el teléfono, así que
+sirve tanto para **MIUI/HyperOS** (Android 14, vendor 4.19) como para
+**AOSP/Lineage** (A16/A17). Ver [`docs/UNIVERSAL.md`](docs/UNIVERSAL.md) para la
+evidencia (ramdisk gzip de MIUI vs lz4 de Lineage, drivers MTK built-in,
+solape de labels del dtbo, configs de Android moderno).
+
+Dos sabores por build: **vanilla** y **KSU** (`CONFIG_KSU=y`, KernelSU-Next).
 
 El pipeline de build reutiliza los arreglos ya validados en
 [`ruby-droid-kernel-build`](https://github.com/criollojoel10/ruby-droid-kernel-build)
@@ -13,11 +20,16 @@ El pipeline de build reutiliza los arreglos ya validados en
 
 | Archivo | Para qué |
 |---|---|
-| `AnyKernel3-…-miui-base-dtb.zip` | **Principal.** Kernel + `mt6877.dtb` base. Conserva el ramdisk de MIUI y usa el `dtbo` que ya tengas. |
-| `AnyKernel3-…-miui-combined-dtb.zip` | Fallback: DTB combinado (ruby ya fusionado, sin overlay). |
-| `dtbo-….img` | Overlay Ruby 6.6 (`fastboot flash dtbo`). Es el que hace juego con el kernel. |
+| `AnyKernel3-…-base-dtb.zip` | **Principal y universal.** Kernel + `mt6877.dtb` base; conserva ramdisk y `dtbo` del equipo. |
+| `AnyKernel3-…-combined-dtb.zip` | Fallback: DTB combinado (ruby ya fusionado, sin overlay). |
+| `dtbo-….img` | Overlay Ruby 6.6, para `fastboot flash dtbo`. |
+| `dtbo-hybrid-….img` | Overlay 6.6 + extras del dtbo de MIUI (videolfb y mt6360). |
+| `boot-6.6-miui-….img` / `boot-6.6-aosp-….img` | Boot ya armado con el ramdisk MIUI / Lineage, para flashear como imagen. |
 | `Image.gz`, `mt6877.dtb`, `ruby.dtbo` | Imágenes crudas para repack manual. |
 | `config-…` / `SHA256SUMS` | Config exacta y hashes. |
+
+Los `boot-*.img` los arma `tools/assemble.sh` a partir del dump del equipo; el
+release los incluye ya verificados.
 
 ## Requisitos y advertencias
 
@@ -31,7 +43,8 @@ El pipeline de build reutiliza los arreglos ya validados en
 - `CONFIG_MTK_AUDIODSP_SUPPORT` queda desactivado porque el snapshot público no
   trae los headers del audio DSP. El audio ASoC normal compila; pueden faltar
   funciones avanzadas de offload/DSP.
-- El vermagic no importa en MIUI: no hay módulos 6.6 que cargar.
+- El vermagic no importa en ningún caso: el vendor de RubyxLabs no trae `.ko`
+  y los drivers necesarios van built-in, así que no hay módulos externos que enganchar.
 
 ## Backups (Termux con root)
 
