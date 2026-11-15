@@ -49,14 +49,19 @@ Empezá por lo más conservador y avanzá sólo si falla:
 
 | # | Qué flashear | Qué conserva | Cuándo pasar al siguiente |
 |---|---|---|---|
+| 0 | `boot-6.6-miui.img` (imagen ya armada) | ramdisk MIUI exacto | no bootea / pantalla negra |
 | 1 | `AnyKernel3-…-miui-base-dtb.zip` | ramdisk **y** `dtbo` de MIUI | no bootea / pantalla negra |
 | 2 | zip 1 + `dtbo-hybrid-….img` (dtbo) | ramdisk MIUI; dtbo = 6.6 + extras MIUI | sigue sin bootear |
 | 3 | `AnyKernel3-…-miui-combined-dtb.zip` | ramdisk MIUI | — |
 
-El zip 1 es el que replica a MoonWake: kernel + `dtb` base dentro de `boot`,
-sin tocar `dtbo`. Es el que tiene más chances de arrancar porque el `dtbo`
-stock de MIUI aplica limpio sobre el `dtb` 6.6 (verificado: los 63 `target`
-del overlay stock existen como labels en el `dtb` 6.6).
+La opción 0 es la más segura: el `boot.img` se arma en local con el dump
+`boot_a` del equipo (`tools/repack-boot.sh`) y se flashea como imagen desde
+OFOX (*Install Image* → Boot) o por `dd` desde Android con root. No depende de
+que el recovery pueda leer/parchear el boot.
+
+El zip 1 replica a MoonWake: kernel + `dtb` base dentro de `boot`, sin tocar
+`dtbo`. Es seguro **porque OFOX se arranca temporalmente** y entonces lee el
+`boot_a` real de MIUI (ver `docs/DEVICE-STATE.md`).
 
 El `dtbo-hybrid` es para cuando el equipo arranca pero **WiFi/consys** o el
 panel no funcionan: agrega los nodos 6.6 (`wifi@18000000`, `seninf_top`,
@@ -120,6 +125,11 @@ flashear (no se sobreescribe solo) y leelo desde Android u OFOX.
 
 ## Rescate — OrangeFox (sin PC)
 
+Estado del equipo verificado en [`docs/DEVICE-STATE.md`](docs/DEVICE-STATE.md):
+Android está en el slot **`_a`**, el `super` **no tiene sistema en `_b`** y
+OFOX se arranca temporalmente (no vive en ninguna partición de boot). O sea:
+**el slot `_b` no es una vía de recuperación**.
+
 1. OFOX → *Install* → *Install Image* → `boot_a-stock.img` → **Boot**.
 2. Si tocaste el dtbo: `dtbo_a-stock.img` → **Dtbo**
    (`vbmeta_a-stock.img` → **Vbmeta** sólo si AVB se queja).
@@ -133,9 +143,9 @@ fastboot flash dtbo dtbo_a-stock.img
 fastboot reboot
 ```
 
-> Si el slot activo es `_b`, usá los `*_b`. En este equipo el `super` puede
-> tener sistema sólo en el slot activo: no cuentes con el otro slot como
-> rescate, contá con OFOX + los backups.
+> Si el kernel nuevo no arranca, el teléfono queda sin sistema: necesitás una
+> forma externa de arrancar OFOX (`fastboot boot ofox.img`, u OTG desde otro
+> Android). El backup en `/sdcard` no se puede aplicar solo.
 
 ## Compilar
 
