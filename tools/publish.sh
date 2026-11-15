@@ -66,6 +66,9 @@ for f in "$art"/dtbo-*.img "$art"/config-*; do [ -f "$f" ] && assets+=("$f"); do
 printf '   %s\n' "${assets[@]##*/}"
 
 if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+  ( cd "$OUT" && sha256sum boot-6.6-*-"${TAG}.img" AnyKernel3-"${TAG}"-*.zip \
+      "dtbo-hybrid-${TAG}.img" > "SHA256SUMS-flashable-${TAG}" )
+  assets+=("$OUT/SHA256SUMS-flashable-${TAG}")
   gh release upload "$TAG" "${assets[@]}" -R "$REPO" --clobber
 else
   gh release create "$TAG" "${assets[@]}" -R "$REPO" --prerelease \
