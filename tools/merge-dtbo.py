@@ -88,6 +88,11 @@ def main(argv):
         text = open(path, encoding="utf-8", errors="surrogateescape").read()
         h, blocks, _ = find_top_blocks(text)
         if head is None:
+            # Algunos dtc (p.ej. 1.7.0 de Ubuntu) NO emiten /plugin/; al
+            # descompilar un dtbo. Sin esa directiva los &label externos se
+            # tratan como error en vez de generar __fixups__.
+            if "/plugin/" not in h:
+                h = h.replace("/dts-v1/;", "/dts-v1/;\n/plugin/;", 1)
             head = h
         frags.extend(b for b in blocks if b[0] not in skip)
 

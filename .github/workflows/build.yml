@@ -269,9 +269,13 @@ jobs:
         run: |
           set -euo pipefail
           export ARCH=arm64 LLVM=1
+          # kbuild trata el target como ruta relativa a arch/arm64/boot/dts,
+          # así que se declara en el Makefile y se compila con `dtbs`.
+          F=arch/arm64/boot/dts/mediatek/Makefile
+          grep -q 'ruby-mt6877-combined.dtb' "$F" || \
+            echo 'dtb-$(CONFIG_MACH_MT6877) += ruby-mt6877-combined.dtb' >> "$F"
           make -j"$(nproc)" CC="ccache clang" \
-            KCFLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}" \
-            arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
+            KCFLAGS="-Wno-error ${HEADER_DEFS:-} ${SEED_FLAGS:-}" dtbs
           ls -lh arch/arm64/boot/dts/mediatek/ruby-mt6877-combined.dtb
 
       - name: Verificar build
@@ -334,14 +338,22 @@ jobs:
 
           # dtbo hibrido: overlays 6.6 (wifi/consys/seninf) + los fragmentos que
           # MIUI trae en su dtbo stock (chosen/videolfb y GPIO del mt6360).
-          dtc -I dtb -O dts -o out/ruby.dtbo.dts out/ruby.dtbo
-          python3 packaging/tools/merge-dtbo.py out/ruby.dtbo.dts \
-            packaging/dtb/miui-extras.dts -o out/hybrid.dts
-          dtc -@ -I dts -O dtb -o out/hybrid.dtb out/hybrid.dts
-          python3 /tmp/mkdtboimg.py create --page_size=2048 \
-            "out/dtbo-hybrid-${TAG}.img" out/hybrid.dtb
-          echo "fragmentos hybrid: $(grep -cE '^[[:space:]]+fragment@' out/hybrid.dts)"
-          fdtget -p out/hybrid.dtb /__fixups__ | tr '\n' ' '; echo
+          # Si algo falla, se avisa y se publica el resto (no se pierde el zip).
+          if (
+            dtc -I dtb -O dts -o out/ruby.dtbo.dts out/ruby.dtbo &&
+            python3 packaging/tools/merge-dtbo.py out/ruby.dtbo.dts \
+              packaging/dtb/miui-extras.dts -o out/hybrid.dts &&
+            dtc -@ -I dts -O dtb -o out/hybrid.dtb out/hybrid.dts && \
+            python3 /tmp/mkdtboimg.py create --page_size=2048 \
+              "out/dtbo-hybrid-${TAG}.img" out/hybrid.dtb &&
+            fdtget -p out/hybrid.dtb /__fixups__ >/dev/null
+          ); then
+            echo "dtbo híbrido ok: $(stat -c %s "out/dtbo-hybrid-${TAG}.img") bytes"
+            echo "fragmentos hybrid: $(grep -cE '^[[:space:]]+fragment@' out/hybrid.dts)"
+          else
+            echo "::warning::no se pudo generar el dtbo híbrido; se publica el resto"
+            rm -f "out/dtbo-hybrid-${TAG}.img"
+          fi
 
           ( cd out && sha256sum ./* > "SHA256SUMS-${VARIANT}" && sha256sum -c "SHA256SUMS-${VARIANT}" >/dev/null )
           ls -lh out/
