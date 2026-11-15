@@ -63,7 +63,7 @@ jobs:
     env:
       # ccache: cache persistente entre runs y entre las dos variantes.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 4G
+      CCACHE_MAXSIZE: 3G
       CCACHE_COMPRESS: "true"
       CCACHE_COMPRESSLEVEL: "6"
       CCACHE_SLOPPINESS: "time_macros,include_file_ctime,include_file_mtime,file_stat_matches"
@@ -91,6 +91,7 @@ jobs:
           restore-keys: |
             ccache-${{ matrix.variant }}-${{ inputs.kernel_ref }}-
             ccache-${{ matrix.variant }}-
+            ccache-
 
       - name: Dependencias
         run: |
