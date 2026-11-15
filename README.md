@@ -95,12 +95,17 @@ AnyKernel3 conserva el ramdisk tal cual y reemplaza sólo kernel y `dtb`.
 APatch parchea **el kernel** del `boot`, así que cualquier kernel nuevo arranca
 sin root. El flujo es de dos pasos y usa la variante **vanilla**:
 
-1. Flasheás `boot-6.6-miui-…img` (o el zip vanilla) y arrancás.
-2. Copiás el mismo `boot-6.6-miui-…img` a `/sdcard/Download`, abrís **APatch**,
-   *Install* → elegís ese `boot.img` → *Patch* (usa tu superkey) → te deja
-   `apatch_patched_….img`.
-3. Flasheás ese `apatch_patched_….img` en `boot` (OFOX → Install Image, o
+**Ya con APatch funcionando (tu caso), es un solo paso sin perder root:**
+
+1. Copiás `boot-6.6-miui-…img` a `/sdcard/Download`.
+2. APatch → *Install* → elegís ese `boot.img` → *Patch* (usa tu superkey) →
+   genera `apatch_patched_11282_….img` con **el kernel 6.6 dentro**.
+3. Flasheás ese `apatch_patched_….img` en `boot` (OFOX → *Install Image*, o
    `tools/flash-boot.sh`).
+
+Así el teléfono arranca ya con 6.6 **y** root APatch, sin pasar por un arranque
+sin root. Si preferís primero validar el kernel sin root, flasheás el
+`boot-6.6-miui-…img` tal cual y después repetís el paso 2 con la misma imagen.
 
 Requisitos de APatch que este kernel cumple: `CONFIG_KALLSYMS=y`,
 `CONFIG_KALLSYMS_ALL=y`, `CONFIG_KPROBES=y`, kernel 6.6 (APatch soporta 3.18–6.12)
