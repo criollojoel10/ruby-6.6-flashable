@@ -13,6 +13,7 @@
 #   AOSP_BOOT   boot de Lineage/AOSP para el boot prearmado (opcional)
 #   DOWNLOAD    dir de descarga (default: ./dl/<run>)
 #   DRY_RUN=1   arma todo en local pero no sube al release
+#   RELEASE_TAG tag del release destino (si vacio, se deduce del artifact)
 set -euo pipefail
 
 RUN=${1:?run id}
@@ -81,7 +82,7 @@ for art in "${ARTS[@]}"; do
   reltags+=("$(echo "$TAG" | sed -E 's/-(vanilla|ksu)$//')")
 done
 
-REL=$(printf '%s\n' "${reltags[@]}" | sort -u | head -n1)
+REL=${RELEASE_TAG:-$(printf '%s\n' "${reltags[@]}" | sort -u | head -n1)}
 [ -n "$REL" ] || { echo "no pude determinar el tag del release" >&2; exit 1; }
 echo
 echo "== release: $REL =="
