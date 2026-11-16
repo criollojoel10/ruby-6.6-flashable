@@ -40,6 +40,9 @@ build_boot() {
   ( cd "$d/repack"
     "$MB" unpack "$d/orig.img" >/dev/null
     gzip -dc "$DIR/Image.gz" > kernel
+    # Cabecera "EFI" (MZ) para que APatch/kptools pueda parchear kernels 6.6
+    # compilados con CONFIG_EFI=n (ver tools/fix-apatch-header.py).
+    python3 "$HERE/fix-apatch-header.py" kernel
     cp "$DIR/mt6877.dtb" dtb
     "$MB" repack "$d/orig.img" boot-new.img >/dev/null
     cp boot-new.img "$OUT/$name"

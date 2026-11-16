@@ -311,6 +311,9 @@ jobs:
 
           mkdir -p out
           cp kernel/arch/arm64/boot/Image.gz out/
+          # APatch/kptools necesita la cabecera "MZ" (CONFIG_EFI) para leer el
+          # branch del offset 4; el kernel sale con NOP por CONFIG_EFI=n.
+          python3 packaging/tools/fix-apatch-header.py out/Image.gz
           cp kernel/arch/arm64/boot/dts/mediatek/mt6877.dtb out/
           cp kernel/arch/arm64/boot/dts/mediatek/ruby.dtbo out/
           cp kernel/.config "out/config-${KSHORT}-${VARIANT}"
